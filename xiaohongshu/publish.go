@@ -70,14 +70,48 @@ func NewPublishImageAction(page *rod.Page) (*PublishAction, error) {
 }
 
 func (p *PublishAction) Publish(ctx context.Context, content PublishImageContent) error {
-	if len(content.ImagePaths) == 0 {
-		return errors.New("图片不能为空")
+	page := p.page.Context(ctx)
+	tags, err := p.fillContentForm(page, content)
+	if err != nil {
+		return err
 	}
 
+	logrus.Infof("发布内容: title=%s, images=%v, tags=%v, schedule=%v, original=%v, visibility=%s, products=%v", content.Title, len(content.ImagePaths), tags, content.ScheduleTime, content.IsOriginal, content.Visibility, content.Products)
+
+	if err := clickPublishButton(page); err != nil {
+		return errors.Wrap(err, "小红书发布失败")
+	}
+
+	return nil
+}
+
+// SaveDraft fills the creator form and clicks a platform draft/save button when available.
+// It never clicks the publish button. If Xiaohongshu changes/removes the draft button,
+// this returns an explicit error instead of publishing.
+func (p *PublishAction) SaveDraft(ctx context.Context, content PublishImageContent) error {
 	page := p.page.Context(ctx)
+	tags, err := p.fillContentForm(page, content)
+	if err != nil {
+		return err
+	}
+
+	logrus.Infof("保存草稿: title=%s, images=%v, tags=%v, schedule=%v, original=%v, visibility=%s, products=%v", content.Title, len(content.ImagePaths), tags, content.ScheduleTime, content.IsOriginal, content.Visibility, content.Products)
+
+	if err := clickDraftButton(page); err != nil {
+		return errors.Wrap(err, "保存草稿失败（未点击发布按钮）")
+	}
+
+	time.Sleep(3 * time.Second)
+	return nil
+}
+
+func (p *PublishAction) fillContentForm(page *rod.Page, content PublishImageContent) ([]string, error) {
+	if len(content.ImagePaths) == 0 {
+		return nil, errors.New("图片不能为空")
+	}
 
 	if err := uploadImages(page, content.ImagePaths); err != nil {
-		return errors.Wrap(err, "小红书上传图片失败")
+		return nil, errors.Wrap(err, "小红书上传图片失败")
 	}
 
 	tags := content.Tags
@@ -86,13 +120,11 @@ func (p *PublishAction) Publish(ctx context.Context, content PublishImageContent
 		tags = tags[:10]
 	}
 
-	logrus.Infof("发布内容: title=%s, images=%v, tags=%v, schedule=%v, original=%v, visibility=%s, products=%v", content.Title, len(content.ImagePaths), tags, content.ScheduleTime, content.IsOriginal, content.Visibility, content.Products)
-
-	if err := submitPublish(page, content.Title, content.Content, tags, content.ScheduleTime, content.IsOriginal, content.Visibility, content.Products); err != nil {
-		return errors.Wrap(err, "小红书发布失败")
+	if err := fillPublishForm(page, content.Title, content.Content, tags, content.ScheduleTime, content.IsOriginal, content.Visibility, content.Products); err != nil {
+		return tags, err
 	}
 
-	return nil
+	return tags, nil
 }
 
 func removePopCover(page *rod.Page) {
@@ -272,7 +304,7 @@ func waitForUploadComplete(page *rod.Page, expectedCount int) error {
 	return errors.Errorf("第%d张图片上传超时(60s)，请检查网络连接和图片大小", expectedCount)
 }
 
-func submitPublish(page *rod.Page, title, content string, tags []string, scheduleTime *time.Time, isOriginal bool, visibility string, products []string) error {
+func fillPublishForm(page *rod.Page, title, content string, tags []string, scheduleTime *time.Time, isOriginal bool, visibility string, products []string) error {
 	titleElem, err := page.Element("div.d-input input")
 	if err != nil {
 		return errors.Wrap(err, "查找标题输入框失败")
@@ -339,6 +371,10 @@ func submitPublish(page *rod.Page, title, content string, tags []string, schedul
 		return errors.Wrap(err, "绑定商品失败")
 	}
 
+	return nil
+}
+
+func clickPublishButton(page *rod.Page) error {
 	submitButton, err := page.Element(".publish-page-publish-btn button.bg-red")
 	if err != nil {
 		return errors.Wrap(err, "查找发布按钮失败")
@@ -349,6 +385,39 @@ func submitPublish(page *rod.Page, title, content string, tags []string, schedul
 
 	time.Sleep(3 * time.Second)
 	return nil
+}
+
+func clickDraftButton(page *rod.Page) error {
+	// Prefer explicit draft/save buttons. Do not fall back to the publish button.
+	candidates := []string{"保存草稿", "存草稿", "保存", "草稿"}
+	buttons, err := page.Elements("button")
+	if err != nil {
+		return errors.Wrap(err, "查找按钮失败")
+	}
+	for _, button := range buttons {
+		if !isElementVisible(button) {
+			continue
+		}
+		text, err := button.Text()
+		if err != nil {
+			continue
+		}
+		text = strings.TrimSpace(text)
+		for _, candidate := range candidates {
+			if text == candidate || strings.Contains(text, candidate) {
+				if strings.Contains(text, "发布") {
+					continue
+				}
+				if err := button.Click(proto.InputMouseButtonLeft, 1); err != nil {
+					return errors.Wrapf(err, "点击草稿按钮失败: %s", text)
+				}
+				logrus.Infof("已点击草稿按钮: %s", text)
+				return nil
+			}
+		}
+	}
+
+	return errors.New("未找到保存草稿按钮；为避免误发布，已停止")
 }
 
 // waitAndClickTitleInput 在填写正文后等待 1 秒并回点标题输入框，增强后续交互稳定性

@@ -194,6 +194,80 @@ func (s *AppServer) handlePublishContent(ctx context.Context, args map[string]in
 	}
 }
 
+// handleSaveDraftContent 处理保存草稿
+func (s *AppServer) handleSaveDraftContent(ctx context.Context, args map[string]interface{}) *MCPToolResult {
+	logrus.Info("MCP: 保存草稿")
+
+	// 解析参数
+	title, _ := args["title"].(string)
+	content, _ := args["content"].(string)
+	imagePathsInterface, _ := args["images"].([]interface{})
+	tagsInterface, _ := args["tags"].([]interface{})
+	productsInterface, _ := args["products"].([]interface{})
+
+	var imagePaths []string
+	for _, path := range imagePathsInterface {
+		if pathStr, ok := path.(string); ok {
+			imagePaths = append(imagePaths, pathStr)
+		}
+	}
+
+	var tags []string
+	for _, tag := range tagsInterface {
+		if tagStr, ok := tag.(string); ok {
+			tags = append(tags, tagStr)
+		}
+	}
+
+	var products []string
+	for _, p := range productsInterface {
+		if pStr, ok := p.(string); ok {
+			products = append(products, pStr)
+		}
+	}
+
+	// 解析定时发布参数
+	scheduleAt, _ := args["schedule_at"].(string)
+	visibility := parseVisibility(args)
+
+	// 解析原创参数
+	isOriginal, _ := args["is_original"].(bool)
+
+	logrus.Infof("MCP: 保存草稿 - 标题: %s, 图片数量: %d, 标签数量: %d, 定时: %s, 原创: %v, visibility: %s, 商品: %v", title, len(imagePaths), len(tags), scheduleAt, isOriginal, visibility, products)
+
+	// 构建发布请求
+	req := &PublishRequest{
+		Title:      title,
+		Content:    content,
+		Images:     imagePaths,
+		Tags:       tags,
+		ScheduleAt: scheduleAt,
+		IsOriginal: isOriginal,
+		Visibility: visibility,
+		Products:   products,
+	}
+
+	// 执行保存草稿
+	result, err := s.xiaohongshuService.SaveDraftContent(ctx, req)
+	if err != nil {
+		return &MCPToolResult{
+			Content: []MCPContent{{
+				Type: "text",
+				Text: "保存草稿失败: " + err.Error(),
+			}},
+			IsError: true,
+		}
+	}
+
+	resultText := fmt.Sprintf("草稿保存成功: %+v", result)
+	return &MCPToolResult{
+		Content: []MCPContent{{
+			Type: "text",
+			Text: resultText,
+		}},
+	}
+}
+
 // handlePublishVideo 处理发布视频内容（仅本地单个视频文件）
 func (s *AppServer) handlePublishVideo(ctx context.Context, args map[string]interface{}) *MCPToolResult {
 	logrus.Info("MCP: 发布视频内容（本地）")

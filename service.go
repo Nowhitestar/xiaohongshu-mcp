@@ -238,6 +238,55 @@ func (s *XiaohongshuService) PublishContent(ctx context.Context, req *PublishReq
 	return response, nil
 }
 
+// SaveDraftContent fills the RedNote creator form and saves it as a platform draft when the UI exposes a draft button.
+func (s *XiaohongshuService) SaveDraftContent(ctx context.Context, req *PublishRequest) (*PublishResponse, error) {
+	if xhsutil.CalcTitleLength(req.Title) > 20 {
+		return nil, fmt.Errorf("标题长度超过限制")
+	}
+
+	imagePaths, err := s.processImages(req.Images)
+	if err != nil {
+		return nil, err
+	}
+
+	content := xiaohongshu.PublishImageContent{
+		Title:      req.Title,
+		Content:    req.Content,
+		Tags:       req.Tags,
+		ImagePaths: imagePaths,
+		IsOriginal: req.IsOriginal,
+		Visibility: req.Visibility,
+		Products:   req.Products,
+	}
+
+	if err := s.saveDraftContent(ctx, content); err != nil {
+		logrus.Errorf("保存草稿失败: title=%s %v", content.Title, err)
+		return nil, err
+	}
+
+	return &PublishResponse{
+		Title:   req.Title,
+		Content: req.Content,
+		Images:  len(imagePaths),
+		Status:  "草稿已保存",
+	}, nil
+}
+
+func (s *XiaohongshuService) saveDraftContent(ctx context.Context, content xiaohongshu.PublishImageContent) error {
+	b := newBrowser()
+	defer b.Close()
+
+	page := b.NewPage()
+	defer page.Close()
+
+	action, err := xiaohongshu.NewPublishImageAction(page)
+	if err != nil {
+		return err
+	}
+
+	return action.SaveDraft(ctx, content)
+}
+
 // processImages 处理图片列表，支持URL下载和本地路径
 func (s *XiaohongshuService) processImages(images []string) ([]string, error) {
 	processor := downloader.NewImageProcessor()

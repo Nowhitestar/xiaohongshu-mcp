@@ -27,6 +27,9 @@ type PublishContentArgs struct {
 	Products   []string `json:"products,omitempty" jsonschema:"商品关键词列表（可选），用于绑定带货商品。填写商品名称或商品ID，系统会自动搜索并选择第一个匹配结果。需账号已开通商品功能。示例: [面膜, 防晒霜SPF50]"`
 }
 
+// SaveDraftContentArgs 保存图文草稿的参数
+type SaveDraftContentArgs = PublishContentArgs
+
 // PublishVideoArgs 发布视频的参数（仅支持本地单个视频文件）
 type PublishVideoArgs struct {
 	Title      string   `json:"title" jsonschema:"内容标题（小红书限制：最多20个中文字或英文单词）"`
@@ -224,6 +227,31 @@ func registerTools(server *mcp.Server, appServer *AppServer) {
 				"products":    convertStringsToInterfaces(args.Products),
 			}
 			result := appServer.handlePublishContent(ctx, argsMap)
+			return convertToMCPResult(result), nil, nil
+		}),
+	)
+
+	// 工具 4.5: 保存图文草稿（不会点击发布按钮）
+	mcp.AddTool(server,
+		&mcp.Tool{
+			Name:        "save_draft_content",
+			Description: "保存小红书图文草稿。会上传图片并填写标题/正文/标签，然后尝试点击平台草稿/保存按钮；绝不点击发布按钮。若页面没有草稿按钮则返回错误。",
+			Annotations: &mcp.ToolAnnotations{
+				Title:           "Save Draft Content",
+				DestructiveHint: boolPtr(true),
+			},
+		},
+		withPanicRecovery("save_draft_content", func(ctx context.Context, req *mcp.CallToolRequest, args SaveDraftContentArgs) (*mcp.CallToolResult, any, error) {
+			argsMap := map[string]interface{}{
+				"title":       args.Title,
+				"content":     args.Content,
+				"images":      convertStringsToInterfaces(args.Images),
+				"tags":        convertStringsToInterfaces(args.Tags),
+				"is_original": args.IsOriginal,
+				"visibility":  args.Visibility,
+				"products":    convertStringsToInterfaces(args.Products),
+			}
+			result := appServer.handleSaveDraftContent(ctx, argsMap)
 			return convertToMCPResult(result), nil, nil
 		}),
 	)
